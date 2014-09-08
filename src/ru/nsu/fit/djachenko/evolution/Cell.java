@@ -386,6 +386,24 @@ public class Cell implements Runnable
 		drawDataRequest.Wait();
 	}
 
+	private void balance()
+	{
+		int[] stats = new int[(int)bounds.getHeight() + 2 * Constants.DELTA];
+
+		nextGeneration.forEach(agent->stats[agent.getY()]++);
+
+		int[] newSizes = new int[2];
+		int[] bufferSizes = {stats.length, newSizes.length};
+
+		columnCommunicator.Isend(bufferSizes, 0, bufferSizes.length, MPI.INT, 0, Tags.BALANCE_HEIGHT_SIZE_TAG);
+		columnCommunicator.Isend(stats, 0, stats.length, MPI.INT, 0, Tags.BALANCE_HEIGHT_DATA_TAG);
+
+		Request heightBalanceRequest = columnCommunicator.Irecv(newSizes, 0, newSizes.length, MPI.INT, 0, Tags.BALANCE_DIMENSIONS_TAG);
+		heightBalanceRequest.Wait();
+
+		bounds.setRect(bounds.getX(), newSizes[0], bounds.getWidth(), newSizes[1] - newSizes[0]);
+	}
+
 	//console output. can be useful while testing. methods below are submethods containing repeated parts of code
 	@Override
 	public String toString()

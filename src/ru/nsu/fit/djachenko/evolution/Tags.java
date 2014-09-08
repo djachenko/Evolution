@@ -17,4 +17,8 @@ public final class Tags
 
 	public static final int DRAW_SIZE_TAG = 129;
 	public static final int DRAW_DATA_TAG = 131;
+
+	public static final int BALANCE_HEIGHT_SIZE_TAG = 133;
+	public static final int BALANCE_HEIGHT_DATA_TAG = 135;
+	public static final int BALANCE_DIMENSIONS_TAG = 137;
 }
