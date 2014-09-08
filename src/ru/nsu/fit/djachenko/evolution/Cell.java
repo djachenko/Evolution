@@ -9,68 +9,88 @@ import java.util.stream.Collectors;
 
 public class Cell implements Runnable
 {
-	int[] sizes = new int[4];
+	//array with cell bounds. is used for determining wheter agent has left this cell
+	int[] cellBounds = new int[4];
 
+	//two agent generations. current generation is read on every iteration, next generation is being counted based on current.
 	private Set<Agent> currentGeneration = new HashSet<>();
 	private Set<Agent> nextGeneration = new HashSet<>();
 
+	//strategy for choosing pair for breeding agent
 	private final FindStrategy findStrategy = new FindStrategy();
 	private final Random random = new Random();
 
+	//pool for reusing agents
 	private final AgentPool agentPool = AgentPool.getInstance();
 
+	//serializer is used for preparing data for sending and interpreting received data
 	private final Serializer serializer = new Serializer();
 
+	//number of cells in column communicator
 	private final int size;
 
+	//rank of upper cell relatively to current
 	private final int topRank;
+	//rank of lower cell
 	private final int bottomRank;
 
-	private final Intracomm communicator;
+	//comunicator for sending data within column
+	private final Intracomm columnCommunicator;
 
+	//buffers for receiving data. if their size will become too small, they will be enlarged
 	private byte[] topBuffer = new byte[1024];
 	private byte[] bottomBuffer = new byte[1024];
 	private byte[] metaBuffer = new byte[1024];
 
+	//buffers for sending and receivig sizes of transmitted data.
+	//one cell for received data size and one for sent data size
 	private final int[] topSizeBuffer = new int[2];
 	private final int[] bottomSizeBuffer = new int[2];
 	private final int[] metaSizeBuffer = new int[2];
 
-	public Cell(Intracomm communicator, int xPosition)
+	private final Intracomm outputCommunicator;
+
+	public Cell(Intracomm columnCommunicator, Intracomm outputCommunicator, int xPosition)
 	{
-		this.communicator = communicator;
+		this.columnCommunicator = columnCommunicator;
+		this.outputCommunicator = outputCommunicator;
 
-		int rank = communicator.Rank();
-		this.size = communicator.Size();
+		int rank = columnCommunicator.Rank();
+		this.size = columnCommunicator.Size();
 
+		//determining current cell place in column
 		this.topRank = rank + 1;
 		this.bottomRank = rank - 1;
 
 		int cellHeight = (int) Math.ceil(1.0 * Constants.HEIGHT / Constants.GRID_HEIGHT);
 		int cellWidth = (int) Math.ceil(1.0 * Constants.WIDTH / Constants.GRID_WIDTH);
 
-		sizes[Constants.BOTTOM] = (rank - 1) * cellHeight;
-		sizes[Constants.TOP] = rank * cellHeight;
-		sizes[Constants.LEFT] = xPosition * cellWidth;
-		sizes[Constants.RIGHT] = (xPosition + 1) * cellWidth;
+		//counting its bounds
+		cellBounds[Constants.BOTTOM] = (rank - 1) * cellHeight;
+		cellBounds[Constants.TOP] = rank * cellHeight;
+		cellBounds[Constants.LEFT] = xPosition * cellWidth;
+		cellBounds[Constants.RIGHT] = (xPosition + 1) * cellWidth;
 
-		Agent agent = AgentPool.getInstance().get(sizes[Constants.LEFT] + 1, sizes[Constants.BOTTOM] + 1);
+		Agent agent = AgentPool.getInstance().get(cellBounds[Constants.LEFT] + 1, cellBounds[Constants.BOTTOM] + 1, random.nextInt(254), random.nextInt(254));
 
 		add(agent);
-
-		System.out.println(agent + " " + rank);
 	}
 
+	//finding pair for breeding agent
 	Agent findNearest(int x, int y)
 	{
+		//current generation is filtered by straight distance from breeding agent
+		//this distance is set as paramater and can be changed.
 		List<Agent> candidates = currentGeneration.stream()
 		                                          .filter(agent -> Math.abs(agent.getX() - x) <= Constants.DELTA &&
 		                                                           Math.abs(agent.getY() - y) <= Constants.DELTA)
 		                                          .collect(Collectors.toCollection(LinkedList::new));
 
+		//then strategy chooses one from filtered above
 		return findStrategy.choose(candidates, x, y);
 	}
 
+	//checks if there isn't agent with given coordinates in current generation
 	boolean isEmpty(int x, int y)
 	{
 		for (Agent agent : currentGeneration)
@@ -84,138 +104,139 @@ public class Cell implements Runnable
 		return true;
 	}
 
-	boolean nextEmpty(int x, int y)
-	{
-		for (Agent agent : nextGeneration)
-		{
-			if (agent.getX() == x && agent.getY() == y)
-			{
-				return false;
-			}
-		}
-
-		return true;
-	}
-
+	//agent is added to next generation
 	void add(Agent agent)
 	{
 		nextGeneration.add(agent);
 
+		//agent owner is set as delegate.
 		agent.setOwner(this);
 	}
 
+	//"moving agent". next generation is generated from scrath
+	//we can't just add agent to next generation with changed coordinates because it still can be used by other agents on current iteration
 	void move(Agent agent, int toX, int toY)
 	{
-		add(agentPool.get(toX, toY));
+		add(agentPool.get(toX, toY, agent.getGeneA(), agent.getGeneB()));
 	}
 
+	//if agent was previously added to next generation, it will be removed. if not, nothing happens
 	void remove(Agent agent)
 	{
 		nextGeneration.remove(agent);
 	}
 
+	//agent will be just copied to next generation
 	void save(Agent agent)
 	{
 	add(agent);
 	}
 
+	//iteration method
 	@Override
 	public void run()
 	{
-		for (int i = 0; i < Constants.ITERATION_COUNT; i++)
-		{
-			countIteration();
+		//each iteration contains three phases: counting
+		countIteration();
 
-			sync();
-		}
+		//synchronization
+		sync();
+
+		//and sending data for output
+		drawSync();
 	}
 
 	private void countIteration()
 	{
 		Set<Agent> temp = currentGeneration;
 
+		//next generation is being set as current
 		currentGeneration = nextGeneration;
 		nextGeneration = temp;
 
 		nextGeneration.clear();
 
+		//current generation contains not only cell, but also its edges
+		//here we are creating subset of generation, which doesn't contain edges
 		Set<Agent> agents = currentGeneration.stream()
-		                                     .filter(agent -> agent.getX() >= sizes[Constants.LEFT] &&
-		                                                      agent.getX() < sizes[Constants.RIGHT] &&
-		                                                      agent.getY() >= sizes[Constants.BOTTOM] &&
-		                                                      agent.getY() < sizes[Constants.TOP])
+		                                     .filter(agent -> agent.getX() >= cellBounds[Constants.LEFT] &&
+		                                                      agent.getX() < cellBounds[Constants.RIGHT] &&
+		                                                      agent.getY() >= cellBounds[Constants.BOTTOM] &&
+		                                                      agent.getY() < cellBounds[Constants.TOP])
 		                                     .collect(Collectors.toSet());
 
+		//creating arbitrary subset of agents and making each of them breed
 		agents.stream()
 		      .filter(agent -> random.nextInt(Constants.BREEDCHANCE) == 0)
 		      .forEach(Agent::breed);
 
+		//iterating through agents is required this way because of more complex causes
 		for (Agent agent : agents)
 		{
+			//for every agent we choose if it dies
 			if (random.nextInt(Constants.DIECHANCE) == 0)
 			{
 				agent.die();
 			}
+			//if it survives, it tries to move
 			else if (random.nextInt(Constants.MOVECHANCE) == 0)
 			{
 				agent.move();
 			}
+			//and, if not, it just survives
 			else
 			{
 				agent.survive();
 			}
 		}
 
+		//here we leave in current generation those who wasn't copied to next generation directly
 		currentGeneration.removeAll(nextGeneration);
 
+		//and then all of them are returned to pool
 		AgentPool.getInstance().addAll(currentGeneration);
-	}
-
-	void populate()
-	{
-		for (int i = 0; i < 10; i++)
-		{
-			Agent agent = new Agent(random.nextInt(sizes[Constants.RIGHT] - sizes[Constants.LEFT]) + sizes[Constants.LEFT],
-			                        random.nextInt(sizes[Constants.TOP] - sizes[Constants.BOTTOM]) + sizes[Constants.BOTTOM]);
-
-			while (!nextEmpty(agent.getX(), agent.getY()))
-			{
-				agent = new Agent(random.nextInt(sizes[Constants.RIGHT] - sizes[Constants.LEFT]) + sizes[Constants.LEFT],
-				                  random.nextInt(sizes[Constants.TOP] - sizes[Constants.BOTTOM]) + sizes[Constants.BOTTOM]);
-			}
-
-			add(agent);
-			System.out.println(agent);
-		}
 	}
 
 	void sync()
 	{
-		int top = sizes[Constants.TOP];
-		int bottom = sizes[Constants.BOTTOM];
-		int left = sizes[Constants.LEFT];
-		int right = sizes[Constants.RIGHT];
+		int top = cellBounds[Constants.TOP];
+		int bottom = cellBounds[Constants.BOTTOM];
+		int left = cellBounds[Constants.LEFT];
+		int right = cellBounds[Constants.RIGHT];
 
+		//here we create subset of agents who moved to left/right cells or are visible from them
+		//and then they are serialized into byte array (MPI send functions require arrays as parameters) (more in Serializer.java)
 		byte[] metaArray = serializer.serialize(nextGeneration.stream()
 		                                                      .filter(agent -> agent.getX() < left + Constants.DELTA ||
 		                                                                       agent.getX() >= right - Constants.DELTA)
 		                                                      .collect(Collectors.toSet()));
 
-		System.out.println("metaArray.length = " + metaArray.length);
-
+		//its size is stored into array cell
 		metaSizeBuffer[0] = metaArray.length;
 
-		communicator.Isend(metaSizeBuffer, 0, 1, MPI.INT, 0, Tags.META_SIZE_TAG);
-		Request metaDataSendRequest = communicator.Isend(metaArray, 0, metaArray.length, MPI.BYTE, 0, Tags.META_DATA_TAG);
+		//and then this cell is sent as subarray with length 1
+		//we have to send size before data in order to let receiving cell prepare enough place for data
 
+		//this agents are sent to metacell, which manages horizontal synchronization
+		//metacell always has 0 rank within column communicator
+		columnCommunicator.Isend(metaSizeBuffer, 0, 1, MPI.INT, 0, Tags.META_SIZE_TAG);
+		//we don't need to wait for receiving size, because this will definetely happen before data receiving
+		//they won't be messed because of tags
+		//but we have to wait data receiving
+		Request metaDataSendRequest = columnCommunicator.Isend(metaArray, 0, metaArray.length, MPI.BYTE, 0, Tags.META_DATA_TAG);
+
+		//requests for sending/receiving data from top/bottom can be not initialized
+		//(if current cell is top or bottom)
 		Request topDataSendRequest = null;
 		Request bottomDataSendRequest = null;
 
 		Request topSizeRecvRequest = null;
 		Request bottomSizeRecvRequest = null;
 
+		//if topRank is valid...
 		if (topRank < size && topRank > 0)
 		{
+			//...serialize moved and visible from top agents to array...
 			byte[] topArray = serializer.serialize(nextGeneration.stream()
 			                                                     .filter(agent -> top - agent.getY() <=
 			                                                                      Constants.DELTA &&
@@ -223,35 +244,63 @@ public class Cell implements Runnable
 			                                                                      agent.getX() < right)
 			                                                     .collect(Collectors.toSet()));
 
+			//...store its size...
 			topSizeBuffer[0] = topArray.length;
 
-			communicator.Isend(topSizeBuffer, 0, 1, MPI.INT, topRank, Tags.LEFT_SIZE_TAG);
-			topDataSendRequest = communicator.Isend(topArray, 0, topArray.length, MPI.BYTE, topRank, Tags.LEFT_DATA_TAG);
+			//...and send them the same way
+			columnCommunicator.Isend(topSizeBuffer, 0, 1, MPI.INT, topRank, Tags.LEFT_SIZE_TAG);
+			topDataSendRequest = columnCommunicator.Isend(topArray, 0, topArray.length, MPI.BYTE, topRank, Tags.LEFT_DATA_TAG);
 
-			topSizeRecvRequest = communicator.Irecv(topSizeBuffer, 1, 1, MPI.INT, topRank, Tags.RIGHT_SIZE_TAG);
+			//also cell starts to wait for receiving size of data which will be sent from top
+			topSizeRecvRequest = columnCommunicator.Irecv(topSizeBuffer, 1, 1, MPI.INT, topRank, Tags.RIGHT_SIZE_TAG);
 		}
 
+		//here the same logic happens, changing several details:
+		//1. rank valid bounds
+		//2. predicate for filtering
+		//3. rank
+		//4. tags
 		if (bottomRank > 0 && bottomRank < size)
 		{
 			byte[] bottomArray = serializer.serialize(nextGeneration.stream()
-			                                                        .filter(agent -> agent.getY() - bottom <
-			                                                                         Constants.DELTA &&
-			                                                                         agent.getX() >= left &&
-			                                                                         agent.getX() < right)
+			                                                        .filter(agent->agent.getY() - bottom <
+			                                                                       Constants.DELTA &&
+			                                                                       agent.getX() >= left &&
+			                                                                       agent.getX() < right)
 			                                                        .collect(Collectors.toSet()));
 
 			bottomSizeBuffer[0] = bottomArray.length;
 
-			communicator.Isend(bottomSizeBuffer, 0, 1, MPI.INT, bottomRank, Tags.RIGHT_SIZE_TAG);
-			bottomDataSendRequest = communicator.Isend(bottomArray, 0, bottomArray.length, MPI.BYTE, bottomRank, Tags.RIGHT_DATA_TAG);
+			columnCommunicator.Isend(bottomSizeBuffer, 0, 1, MPI.INT, bottomRank, Tags.RIGHT_SIZE_TAG);
+			bottomDataSendRequest = columnCommunicator.Isend(bottomArray, 0, bottomArray.length, MPI.BYTE, bottomRank, Tags.RIGHT_DATA_TAG);
 
-			bottomSizeRecvRequest = communicator.Irecv(bottomSizeBuffer, 1, 1, MPI.INT, bottomRank, Tags.LEFT_SIZE_TAG);
+			bottomSizeRecvRequest = columnCommunicator.Irecv(bottomSizeBuffer, 1, 1, MPI.INT, bottomRank, Tags.LEFT_SIZE_TAG);
 		}
 
-		Request metaSizeRecvRequest = communicator.Irecv(metaSizeBuffer, 1, 1, MPI.INT, 0, Tags.META_SIZE_TAG);
+		//here cell starts to wait for data size from metacell
+		Request metaSizeRecvRequest = columnCommunicator.Irecv(metaSizeBuffer, 1, 1, MPI.INT, 0, Tags.META_SIZE_TAG);
+
+
+		Request bottomDataRecvRequest = null;
+
+		//here we start to wait for data from bottom (it will send data to top first, so chance of receiving data from bottom is bigger)
+		if (bottomSizeRecvRequest != null)
+		{
+			//we wait for receiving size
+			bottomSizeRecvRequest.Wait();
+
+			int bottomSize = bottomSizeBuffer[1];
+			//enlarging buffer size if required
+			bottomBuffer = bottomSize > bottomBuffer.length ? new byte[bottomSize] : bottomBuffer;
+
+			//and start to wait for receiving data
+			bottomDataRecvRequest = columnCommunicator.Irecv(bottomBuffer, 0, bottomBuffer.length, MPI.BYTE, bottomRank, Tags.LEFT_DATA_TAG);
+		}
+
 
 		Request topDataRecvRequest = null;
 
+		//here we do mainly the same logic, but with other direction
 		if (topSizeRecvRequest != null)
 		{
 			topSizeRecvRequest.Wait();
@@ -259,28 +308,28 @@ public class Cell implements Runnable
 			int topSize = topSizeBuffer[1];
 			topBuffer = topSize > topBuffer.length ? new byte[topSize] : topBuffer;
 
-			topDataRecvRequest = communicator.Irecv(topBuffer, 0, topBuffer.length, MPI.BYTE, topRank, Tags.RIGHT_DATA_TAG);
+			topDataRecvRequest = columnCommunicator.Irecv(topBuffer, 0, topBuffer.length, MPI.BYTE, topRank, Tags.RIGHT_DATA_TAG);
 		}
 
-		Request bottomDataRecvRequest = null;
 
-		if (bottomSizeRecvRequest != null)
-		{
-			bottomSizeRecvRequest.Wait();
-
-			int bottomSize = bottomSizeBuffer[1];
-			bottomBuffer = bottomSize > bottomBuffer.length ? new byte[bottomSize] : bottomBuffer;
-
-			bottomDataRecvRequest = communicator.Irecv(bottomBuffer, 0, bottomBuffer.length, MPI.BYTE, bottomRank, Tags.LEFT_DATA_TAG);
-		}
-
+		//hrer waiting and receiving size and data from metacell using the same scheme
 		metaSizeRecvRequest.Wait();
 
 		int metaSize = metaSizeBuffer[1];
 		metaBuffer = metaSize > metaBuffer.length ? new byte[metaSize] : metaBuffer;
 
-		Request metaDataRecvRequest = communicator.Irecv(metaBuffer, 0, metaBuffer.length, MPI.BYTE, 0, Tags.META_DATA_TAG);
+		Request metaDataRecvRequest = columnCommunicator.Irecv(metaBuffer, 0, metaBuffer.length, MPI.BYTE, 0, Tags.META_DATA_TAG);
 
+		//waiting for data from bottom...
+		if (bottomDataRecvRequest != null)
+		{
+			bottomDataRecvRequest.Wait();
+
+			//received data is interpreted as collection of agents and added to next generation
+			serializer.deserialize(bottomBuffer).forEach(this::add);
+		}
+
+		//...top...
 		if (topDataRecvRequest != null)
 		{
 			topDataRecvRequest.Wait();
@@ -288,13 +337,7 @@ public class Cell implements Runnable
 			serializer.deserialize(topBuffer).forEach(this::add);
 		}
 
-		if (bottomDataRecvRequest != null)
-		{
-			bottomDataRecvRequest.Wait();
-
-			serializer.deserialize(bottomBuffer).forEach(this::add);
-		}
-
+		//...and sides
 		metaDataRecvRequest.Wait();
 
 		serializer.deserialize(metaBuffer).forEach(this::add);
@@ -310,24 +353,42 @@ public class Cell implements Runnable
 		{
 			bottomDataSendRequest.Wait();
 		}
-
-		communicator.Barrier();
-
-		//maybe at start!
-		//or not to wait
 	}
 
+	//sending data for output
+	private void drawSync()
+	{
+		//the same model as in simple sync():
+		//filter needed (those which are in cell)
+		Set<Agent> agentsToDraw = nextGeneration.stream()
+		                                   .filter(agent->agent.getX() >= cellBounds[Constants.LEFT] &&
+		                                                  agent.getX() < cellBounds[Constants.RIGHT] &&
+		                                                  agent.getY() >= cellBounds[Constants.BOTTOM] &&
+		                                                  agent.getY() < cellBounds[Constants.TOP])
+		                                   .collect(Collectors.toSet());
+
+		//serialize them
+		byte[] drawBytes = serializer.serialize(agentsToDraw);
+		int[] drawBytesSize = {drawBytes.length};
+
+		//and send. outputting process always is 0 within output communicator
+		outputCommunicator.Isend(drawBytesSize, 0, drawBytesSize.length, MPI.INT, 0, Tags.DRAW_SIZE_TAG);
+		Request drawDataRequest = outputCommunicator.Isend(drawBytes, 0, drawBytes.length, MPI.BYTE, 0, Tags.DRAW_DATA_TAG);
+		drawDataRequest.Wait();
+	}
+
+	//console output. can be useful while testing. methods below are submethods containing repeated parts of code
 	@Override
 	public String toString()
 	{
 		String border = border();
 
 		return border +
-		       toSection(sizes[Constants.TOP] + Constants.DELTA, sizes[Constants.TOP]) +
+		       toSection(cellBounds[Constants.TOP] + Constants.DELTA, cellBounds[Constants.TOP]) +
 		       border +
-		       toSection(sizes[Constants.TOP], sizes[Constants.BOTTOM]) +
+		       toSection(cellBounds[Constants.TOP], cellBounds[Constants.BOTTOM]) +
 		       border +
-		       toSection(sizes[Constants.BOTTOM], sizes[Constants.BOTTOM] - Constants.DELTA) +
+		       toSection(cellBounds[Constants.BOTTOM], cellBounds[Constants.BOTTOM] - Constants.DELTA) +
 		       border +
 		       "\n ";
 	}
@@ -336,7 +397,7 @@ public class Cell implements Runnable
 	{
 		StringBuilder builder = new StringBuilder();
 
-		for (int x = sizes[Constants.LEFT] - Constants.DELTA - 2; x < sizes[Constants.RIGHT] + Constants.DELTA + 2; x++)
+		for (int x = cellBounds[Constants.LEFT] - Constants.DELTA - 2; x < cellBounds[Constants.RIGHT] + Constants.DELTA + 2; x++)
 		{
 			builder.append("NN");
 		}
@@ -354,11 +415,11 @@ public class Cell implements Runnable
 		for (int y = topY - 1; y >= bottomY; y--)
 		{
 			builder.append(border)
-			       .append(subLine(y, sizes[Constants.LEFT] - Constants.DELTA, sizes[Constants.LEFT]))
+			       .append(subLine(y, cellBounds[Constants.LEFT] - Constants.DELTA, cellBounds[Constants.LEFT]))
 			       .append(border)
-			       .append(subLine(y, sizes[Constants.LEFT], sizes[Constants.RIGHT]))
+			       .append(subLine(y, cellBounds[Constants.LEFT], cellBounds[Constants.RIGHT]))
 			       .append(border)
-			       .append(subLine(y, sizes[Constants.RIGHT], sizes[Constants.RIGHT] + Constants.DELTA))
+			       .append(subLine(y, cellBounds[Constants.RIGHT], cellBounds[Constants.RIGHT] + Constants.DELTA))
 			       .append(border)
 			       .append('\n');
 		}

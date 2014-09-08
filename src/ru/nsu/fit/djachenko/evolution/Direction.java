@@ -1,5 +1,6 @@
 package ru.nsu.fit.djachenko.evolution;
 
+//helper class for directions management. mainly handles offsets
 public enum Direction
 {
 	LEFT(-1, 0)

@@ -4,22 +4,10 @@ import java.io.*;
 import java.util.Collections;
 import java.util.Set;
 
+//class for serializing collections of agents to byte array and backwards
 public class Serializer
 {
 	private final ByteArrayOutputStream byteOutStream = new ByteArrayOutputStream();
-	//private ObjectOutputStream objectOutStream;
-	
-	Serializer()
-	{
-		/*try
-		{
-			//objectOutStream = new ObjectOutputStream(byteOutStream);
-		}
-		catch (IOException e)
-		{
-			e.printStackTrace();
-		}*/
-	}
 
 	byte[] serialize(Set<Agent> o)
 	{

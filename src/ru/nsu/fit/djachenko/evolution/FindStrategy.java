@@ -1,5 +1,6 @@
 package ru.nsu.fit.djachenko.evolution;
 
+//stategy which chooses the nearest to given coordinates agent
 public class FindStrategy
 {
 	private static int sqr(int a)

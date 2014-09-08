@@ -8,48 +8,43 @@ public class Agent implements Serializable
 	private int x;
 	private int y;
 
+	private int geneA;
+	private int geneB;
+
+	//owner shouldn't be transferred because it will be assigned after receiving anyway
 	private transient Cell owner;
 
 	private static final Random RANDOM = new Random(System.currentTimeMillis());
+	//for reusing agents instead of creating.
 	private static final AgentPool POOL = AgentPool.getInstance();
 
 	private static final Direction[] DIRECTIONS = Direction.values();
 
-	private static int breedcount = 0;
-	private static int diecount = 0;
-	private static int movecount = 0;
-	private static int survcount = 0;
-
 	Agent()
 	{
-		setState(-1, -1);
-	}
-
-	Agent(int x, int y)
-	{
-		setState(x, y);
+		setState(-1, -1, 127, 127);
 	}
 
 	public void breed()
 	{
+		//Agent tries to breed: tries to find pair and, in case of success, tries to produce new agent
 		Agent pair = owner.findNearest(x, y);
-
-		System.out.println("breed");
 
 		if (pair != null)
 		{
 			Direction breedDirection = DIRECTIONS[RANDOM.nextInt(DIRECTIONS.length)];
 			int distance = RANDOM.nextInt(Constants.DELTA + 1);
 
+			//shift from current agent is chosen arbitrary, but it can't be diagonal
 			int dx = breedDirection.getDx() * distance;
 			int dy = breedDirection.getDy() * distance;
 
+			/*checks if chosen random place near agent is free and, if yes, puts new agent there*/
 			if (owner.isEmpty(x + dx, y + dy))
 			{
-				owner.add(POOL.get(x + dx, y + dy));
+				Agent child = POOL.get(x + dx, y + dy, this.geneB, pair.geneA);
 
-				System.out.println("success");
-				breedcount++;
+				owner.add(child);
 			}
 		}
 	}
@@ -62,34 +57,29 @@ public class Agent implements Serializable
 		int dx = moveDirection.getDx() * distance;
 		int dy = moveDirection.getDy() * distance;
 
-		System.out.println(x + " " + (y) + " " + (owner == null));
-
+		//agent can move to arbitrary chosen number of cell, but only in straight directions
+		//movement happens only if chosen place is empty.
 		if (owner.isEmpty(x + dx, y + dy))
 		{
 			owner.move(this, x + dx, y + dy);
-			System.out.println("move");
-
-			movecount++;
 		}
 		else
 		{
+			//if not, agent just stays still
 			survive();
-			System.out.println("survive");
-
-			survcount++;
 		}
 	}
 
 	public void die()
 	{
+		//death is implemented by marking this agent. once agent is marked, it won't appear on next iteration
 		owner.remove(this);
-		diecount++;
 	}
 
 	public void survive()
 	{
+		//if agent survives, pointer to it is moved to next generation
 		owner.save(this);
-		survcount++;
 	}
 
 	public int getX()
@@ -102,10 +92,28 @@ public class Agent implements Serializable
 		return y;
 	}
 
-	void setState(int x, int y)
+	public int getFenotype()
+	{
+		return (geneA + geneB) / 2;
+	}
+
+	public int getGeneA()
+	{
+		return geneA;
+	}
+
+	public int getGeneB()
+	{
+		return geneB;
+	}
+
+	//there is method for setting state because we need to set state of already allocated object when reusing
+	void setState(int x, int y, int fatherGene, int motherGene)
 	{
 		this.x = x;
 		this.y = y;
+		this.geneA = fatherGene;
+		this.geneB = motherGene;
 	}
 
 	public void setOwner(Cell owner)
@@ -117,13 +125,5 @@ public class Agent implements Serializable
 	public String toString()
 	{
 		return "agent {" + x + "; " + y + '}';
-	}
-
-	public static void stat()
-	{
-		System.out.println("breedcount = " + breedcount);
-		System.out.println("diecount = " + diecount);
-		System.out.println("movecount = " + movecount);
-		System.out.println("survcount = " + survcount);
 	}
 }

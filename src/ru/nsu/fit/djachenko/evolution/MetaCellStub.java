@@ -6,6 +6,8 @@ import mpi.Request;
 
 import java.util.HashSet;
 
+//the same as metacell, but doesn't do horizontal synchronization
+//testing thing
 public class MetaCellStub implements Runnable
 {
 	private final Request[] cellSizeRecvRequests;

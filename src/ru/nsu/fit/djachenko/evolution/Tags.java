@@ -1,5 +1,6 @@
 package ru.nsu.fit.djachenko.evolution;
 
+//class with constant tags for intercommunications
 public final class Tags
 {
 	private Tags()
@@ -13,4 +14,7 @@ public final class Tags
 
 	public static final int RIGHT_SIZE_TAG = 125;
 	public static final int RIGHT_DATA_TAG = 127;
+
+	public static final int DRAW_SIZE_TAG = 129;
+	public static final int DRAW_DATA_TAG = 131;
 }

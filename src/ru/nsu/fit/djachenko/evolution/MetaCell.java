@@ -1,5 +1,6 @@
 package ru.nsu.fit.djachenko.evolution;
 
+import mpi.Group;
 import mpi.Intracomm;
 import mpi.MPI;
 import mpi.Request;
@@ -10,49 +11,78 @@ import java.util.stream.Collectors;
 
 public class MetaCell implements Runnable
 {
+	//sets for agents which have to be sent to left and to right
 	private final Set<Agent> leftEdge = new HashSet<>();
 	private final Set<Agent> rightEdge = new HashSet<>();
 
+	//arrays for storing service data (we have to receive and send data to all cells, and we have to store multiple requests)
 	private final Request[] cellSizeRecvRequests;
 	private final int[][] cellSizeBuffers;
 
 	private final Request[] cellDataRecvRequests;
 	private final byte[][] cellDataBuffers;
 
+	//buffers for sending and receivig sizes of transmitted data.
+	//one cell for received data size and one for sent data size
 	private final int[] leftSizeBuffer = new int[2];
 	private final int[] rightSizeBuffer = new int[2];
 
+	//buffers for receiving data. if their size will become too small, they will be enlarged
 	private byte[] leftDataRecvBuffer = new byte[1024];
 	private byte[] rightDataRecvBuffer = new byte[1024];
 
 	private final Set<Agent> sendSet = new HashSet<>();
 
+	//horizontal bounds
 	private final int left;
 	private final int right;
 
+	//rank of left cell relatively to current
 	private final int leftRank;
+	//rank of right cell
 	private final int rightRank;
 
+	//communicator whic unites all metacells
 	private final Intracomm metaCommunicator;
-	private final Intracomm groupCommunicator;
+	//communicator for column of this metacell
+	private final Intracomm columnCommunicator;
 
+	//number of meta cells
 	private final int metaSize;
 
+	//number of cells in column (including metacell)
 	private final int groupSize;
 
+	//height of one cell in column
 	private final int cellHeight;
 
 	private final Serializer serializer = new Serializer();
 
-	MetaCell(Intracomm metaCommunicator, Intracomm groupCommunicator)
+	MetaCell(Intracomm columnCommunicator)
 	{
-		this.metaCommunicator = metaCommunicator;
-		this.groupCommunicator = groupCommunicator;
+		//creating meta communicator
+		Group globalGroup = MPI.COMM_WORLD.Group();
+
+		int[] metaCells = new int[Constants.GRID_WIDTH];
+
+		//counting subset of metacells
+		for (int i = 0; i < metaCells.length; i++)
+		{
+			metaCells[i] = i * (Constants.GRID_HEIGHT + 1);
+		}
+
+		//creating of subgroup of group of all processes
+		Group metaGroup = globalGroup.Incl(metaCells);
+
+		//creating communicator
+		metaCommunicator = MPI.COMM_WORLD.Create(metaGroup);
+
+		this.columnCommunicator = columnCommunicator;
 
 		int metaRank = metaCommunicator.Rank();
 		this.metaSize = metaCommunicator.Size();
 
-	    this.groupSize = groupCommunicator.Size();
+	    this.groupSize = columnCommunicator.Size();
 
 		int columnWidth = (int) Math.ceil(1.0 * Constants.WIDTH / Constants.GRID_WIDTH);
 
@@ -70,6 +100,7 @@ public class MetaCell implements Runnable
 		cellDataBuffers = new byte[groupSize][1];
 	}
 
+	//iteration method. this cell just synchronizes
 	@Override
 	public void run()
 	{
@@ -78,11 +109,14 @@ public class MetaCell implements Runnable
 
 	private void sync()
 	{
+		//request can be not initialize (e.g. this is the left or right side)
 		Request leftSizeRecvRequest = null;
 		Request rightSizeRecvRequest = null;
 
+		//"if left rank is valid"
 		if (leftRank < metaSize && leftRank >= 0)
 		{
+			//start to wait for receiving size of data from left side
 			leftSizeRecvRequest = metaCommunicator.Irecv(leftSizeBuffer, 1, 1, MPI.INT, leftRank, Tags.RIGHT_SIZE_TAG);
 		}
 
@@ -93,32 +127,34 @@ public class MetaCell implements Runnable
 
 		for (int i = 1; i < groupSize; i++)
 		{
-			cellSizeRecvRequests[i] = groupCommunicator.Irecv(cellSizeBuffers[i], 1, 1, MPI.INT, i, Tags.META_SIZE_TAG);
+			//start to wait for receiving data sizes from every simple cell
+			cellSizeRecvRequests[i] = columnCommunicator.Irecv(cellSizeBuffers[i], 1, 1, MPI.INT, i, Tags.META_SIZE_TAG);
 		}
-
-		System.out.println("precells");
 
 		for (int i = 1; i < groupSize; i++)
 		{
+			//wait for receiving data sizes from every simple cell
 			cellSizeRecvRequests[i].Wait();
 
+			//enlarge buffers if required
 			if (cellDataBuffers[i].length < cellSizeBuffers[i][1])
 			{
 				cellDataBuffers[i] = new byte[cellSizeBuffers[i][1]];
 			}
 
-			System.out.println("cellDataBuffers[i].length = " + cellDataBuffers[i].length + " " + metaCommunicator.Rank() + " " + i);
-
-			cellDataRecvRequests[i] = groupCommunicator.Irecv(cellDataBuffers[i], 0, cellDataBuffers[i].length, MPI.BYTE, i, Tags.META_DATA_TAG);
+			//start waiting for data
+			cellDataRecvRequests[i] = columnCommunicator.Irecv(cellDataBuffers[i], 0, cellDataBuffers[i].length, MPI.BYTE, i, Tags.META_DATA_TAG);
 		}
 
-		System.out.println("preedges");
-
+		//prepare place for received data
 		leftEdge.clear();
 		rightEdge.clear();
 
 		for (int i = 1; i < groupSize; i++)
 		{
+			/*
+			receive data and put them into corresponding set, filtering them
+			*/
 			cellDataRecvRequests[i].Wait();
 
 			Set<Agent> agents = serializer.deserialize(cellDataBuffers[i]);
@@ -132,32 +168,20 @@ public class MetaCell implements Runnable
 			                       .collect(Collectors.toSet()));
 		}
 
-		for (int i = 0; i < metaSize; i++)
-		{
-			if (i == metaCommunicator.Rank())
-			{
-				System.out.println("left " + i);
-
-				leftEdge.forEach(System.out::println);
-
-				System.out.println("right " + i);
-
-				rightEdge.forEach(System.out::println);
-			}
-
-			metaCommunicator.Barrier();
-		}
-
+		//forward received data to left side
 		if (leftRank < metaSize && leftRank >= 0)
 		{
 			byte[] leftDataSendBuffer = serializer.serialize(leftEdge);
 
 			leftSizeBuffer[0] = leftDataSendBuffer.length;
 
+			//size first
 			metaCommunicator.Isend(leftSizeBuffer, 0, 1, MPI.INT, leftRank, Tags.LEFT_SIZE_TAG);
+			//data second
 			metaCommunicator.Isend(leftDataSendBuffer, 0, leftDataSendBuffer.length, MPI.BYTE, leftRank, Tags.LEFT_DATA_TAG);
 		}
 
+		//to right side
 		if (rightRank >= 0 && rightRank < metaSize)
 		{
 			byte[] rightDataSendBuffer = serializer.serialize(rightEdge);
@@ -172,13 +196,16 @@ public class MetaCell implements Runnable
 
 		if (leftSizeRecvRequest != null)
 		{
+			//wait for size of data from left side
 			leftSizeRecvRequest.Wait();
 
+			//enlarge buffer
 			if (leftDataRecvBuffer.length < leftSizeBuffer[1])
 			{
 				leftDataRecvBuffer = new byte[leftSizeBuffer[1]];
 			}
 
+			//and stsrt receiving data
 			leftDataRecvRequest = metaCommunicator.Irecv(leftDataRecvBuffer, 0, leftDataRecvBuffer.length, MPI.BYTE, leftRank, Tags.RIGHT_DATA_TAG);
 		}
 
@@ -200,11 +227,14 @@ public class MetaCell implements Runnable
 
 		if (leftDataRecvRequest != null)
 		{
+			//wait for data from left side
 			leftDataRecvRequest.Wait();
 
+			//and add it to set of all received agents
 			sendSet.addAll(serializer.deserialize(leftDataRecvBuffer));
 		}
 
+		//the same with right side
 		if (rightDataRecvRequest != null)
 		{
 			rightDataRecvRequest.Wait();
@@ -216,6 +246,12 @@ public class MetaCell implements Runnable
 		{
 			int index = i - 1;
 
+			/*
+			* there is some complex logic: here agents are filtered by height. every cell receives agents, which are between its vertical bounds
+			* problem is that we also should send there agents which are not between cell bounds, but are seen from thi cell
+			* they are in top and bottom edges, and they are nearer than DELTA to left or right edges of upper/lower cell.
+			* so we have to use such complex predicate
+			* */
 			Set<Agent> agents = sendSet.stream()
 			                            .filter(agent -> {
 				                            int x = agent.getX();
@@ -230,26 +266,13 @@ public class MetaCell implements Runnable
 			                            })
 			                            .collect(Collectors.toSet());
 
-			for (int j = 0; j < metaSize; j++)
-			{
-				if (j == metaCommunicator.Rank())
-				{
-					System.out.println("sending from " + j + " to " + i);
-
-					agents.forEach(System.out::println);
-				}
-
-				metaCommunicator.Barrier();
-			}
-
+			//once data is filtered, we can send it to destination
 			byte[] cellDataSendBuffer = serializer.serialize(agents);
 
 			cellSizeBuffers[i][0] = cellDataSendBuffer.length;
 
-			groupCommunicator.Isend(cellSizeBuffers[i], 0, 1, MPI.INT, i, Tags.META_SIZE_TAG);
-			groupCommunicator.Isend(cellDataSendBuffer, 0, cellDataSendBuffer.length, MPI.BYTE, i, Tags.META_DATA_TAG);
+			columnCommunicator.Isend(cellSizeBuffers[i], 0, 1, MPI.INT, i, Tags.META_SIZE_TAG);
+			columnCommunicator.Isend(cellDataSendBuffer, 0, cellDataSendBuffer.length, MPI.BYTE, i, Tags.META_DATA_TAG);
 		}
-
-		groupCommunicator.Barrier();
 	}
 }
