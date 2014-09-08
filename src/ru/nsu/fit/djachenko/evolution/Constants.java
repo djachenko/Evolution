@@ -16,7 +16,7 @@ public final class Constants
 	public static final int GRID_WIDTH = 2;
 	public static final int GRID_HEIGHT = 2;
 
-	public static final int ITERATION_COUNT = 1;
+	public static final int ITERATION_COUNT = 200;
 
 	public static final int DELAY_MILLIS = 500;
 }

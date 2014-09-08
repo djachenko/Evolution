@@ -38,10 +38,7 @@ public class MetaCellStub implements Runnable
 	@Override
 	public void run()
 	{
-		for (int i = 0; i < Constants.ITERATION_COUNT; i++)
-		{
-			sync();
-		}
+		sync();
 	}
 
 	private void sync()

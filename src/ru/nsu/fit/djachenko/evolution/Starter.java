@@ -29,8 +29,6 @@ public class Starter
 			System.exit(1);
 		}
 
-		int iter = 200;
-
 		Intracomm columnCommunicator = MPI.COMM_WORLD.Split(rank / (Constants.GRID_HEIGHT + 1), rank);//create communicator for every vertical group
 
 		Intracomm outputCommunicator = Drawer.intracomm();
@@ -50,7 +48,7 @@ public class Starter
 			runnable = new Cell(columnCommunicator, outputCommunicator, rank / (Constants.GRID_HEIGHT + 1));
 		}
 
-		for (int i = 0; i < iter; i++)
+		for (int i = 0; i < Constants.ITERATION_COUNT; i++)
 		{
 			runnable.run();
 
