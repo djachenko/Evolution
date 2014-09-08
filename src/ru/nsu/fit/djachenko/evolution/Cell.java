@@ -4,13 +4,15 @@ import mpi.Intracomm;
 import mpi.MPI;
 import mpi.Request;
 
+import java.awt.*;
 import java.util.*;
+import java.util.List;
 import java.util.stream.Collectors;
 
 public class Cell implements Runnable
 {
 	//array with cell bounds. is used for determining wheter agent has left this cell
-	int[] cellBounds = new int[4];
+	Rectangle bounds;
 
 	//two agent generations. current generation is read on every iteration, next generation is being counted based on current.
 	private Set<Agent> currentGeneration = new HashSet<>();
@@ -66,12 +68,9 @@ public class Cell implements Runnable
 		int cellWidth = (int) Math.ceil(1.0 * Constants.WIDTH / Constants.GRID_WIDTH);
 
 		//counting its bounds
-		cellBounds[Constants.BOTTOM] = (rank - 1) * cellHeight;
-		cellBounds[Constants.TOP] = rank * cellHeight;
-		cellBounds[Constants.LEFT] = xPosition * cellWidth;
-		cellBounds[Constants.RIGHT] = (xPosition + 1) * cellWidth;
+		bounds = new Rectangle(xPosition * cellWidth, (rank - 1) * cellHeight, cellWidth, cellHeight);
 
-		Agent agent = AgentPool.getInstance().get(cellBounds[Constants.LEFT] + 1, cellBounds[Constants.BOTTOM] + 1, random.nextInt(254), random.nextInt(254));
+		Agent agent = AgentPool.getInstance().get((int)bounds.getX() + 1, (int)bounds.getY() + 1, random.nextInt(254), random.nextInt(254));
 
 		add(agent);
 	}
@@ -156,13 +155,18 @@ public class Cell implements Runnable
 
 		nextGeneration.clear();
 
+		int top = (int)(bounds.getY() + bounds.getHeight());
+		int bottom = (int)bounds.getY();
+		int left = (int)bounds.getX();
+		int right = (int)(bounds.getX() + bounds.getWidth());
+
 		//current generation contains not only cell, but also its edges
 		//here we are creating subset of generation, which doesn't contain edges
 		Set<Agent> agents = currentGeneration.stream()
-		                                     .filter(agent -> agent.getX() >= cellBounds[Constants.LEFT] &&
-		                                                      agent.getX() < cellBounds[Constants.RIGHT] &&
-		                                                      agent.getY() >= cellBounds[Constants.BOTTOM] &&
-		                                                      agent.getY() < cellBounds[Constants.TOP])
+		                                     .filter(agent -> agent.getX() >= left &&
+		                                                      agent.getX() < right &&
+		                                                      agent.getY() >= bottom &&
+		                                                      agent.getY() < top)
 		                                     .collect(Collectors.toSet());
 
 		//creating arbitrary subset of agents and making each of them breed
@@ -199,10 +203,10 @@ public class Cell implements Runnable
 
 	void sync()
 	{
-		int top = cellBounds[Constants.TOP];
-		int bottom = cellBounds[Constants.BOTTOM];
-		int left = cellBounds[Constants.LEFT];
-		int right = cellBounds[Constants.RIGHT];
+		int top = (int)(bounds.getY() + bounds.getHeight());
+		int bottom = (int)bounds.getY();
+		int left = (int)bounds.getX();
+		int right = (int)(bounds.getX() + bounds.getWidth());
 
 		//here we create subset of agents who moved to left/right cells or are visible from them
 		//and then they are serialized into byte array (MPI send functions require arrays as parameters) (more in Serializer.java)
@@ -358,13 +362,18 @@ public class Cell implements Runnable
 	//sending data for output
 	private void drawSync()
 	{
+		int top = (int)(bounds.getY() + bounds.getHeight());
+		int bottom = (int)bounds.getY();
+		int left = (int)bounds.getX();
+		int right = (int)(bounds.getX() + bounds.getWidth());
+		
 		//the same model as in simple sync():
 		//filter needed (those which are in cell)
 		Set<Agent> agentsToDraw = nextGeneration.stream()
-		                                   .filter(agent->agent.getX() >= cellBounds[Constants.LEFT] &&
-		                                                  agent.getX() < cellBounds[Constants.RIGHT] &&
-		                                                  agent.getY() >= cellBounds[Constants.BOTTOM] &&
-		                                                  agent.getY() < cellBounds[Constants.TOP])
+		                                   .filter(agent->agent.getX() >= left &&
+		                                                  agent.getX() < right &&
+		                                                  agent.getY() >= bottom &&
+		                                                  agent.getY() < top)
 		                                   .collect(Collectors.toSet());
 
 		//serialize them
@@ -384,11 +393,11 @@ public class Cell implements Runnable
 		String border = border();
 
 		return border +
-		       toSection(cellBounds[Constants.TOP] + Constants.DELTA, cellBounds[Constants.TOP]) +
+		       toSection((int)(bounds.getY() + bounds.getHeight()) + Constants.DELTA, (int)(bounds.getY() + bounds.getHeight())) +
 		       border +
-		       toSection(cellBounds[Constants.TOP], cellBounds[Constants.BOTTOM]) +
+		       toSection((int)(bounds.getY() + bounds.getHeight()), (int)bounds.getY()) +
 		       border +
-		       toSection(cellBounds[Constants.BOTTOM], cellBounds[Constants.BOTTOM] - Constants.DELTA) +
+		       toSection((int)bounds.getY(), (int)bounds.getY() - Constants.DELTA) +
 		       border +
 		       "\n ";
 	}
@@ -397,7 +406,7 @@ public class Cell implements Runnable
 	{
 		StringBuilder builder = new StringBuilder();
 
-		for (int x = cellBounds[Constants.LEFT] - Constants.DELTA - 2; x < cellBounds[Constants.RIGHT] + Constants.DELTA + 2; x++)
+		for (int x = (int)bounds.getX() - Constants.DELTA - 2; x < (int)(bounds.getX() + bounds.getWidth()) + Constants.DELTA + 2; x++)
 		{
 			builder.append("NN");
 		}
@@ -412,14 +421,17 @@ public class Cell implements Runnable
 		StringBuilder builder = new StringBuilder();
 		String border = "NN";
 
+		int left = (int)bounds.getX();
+		int right = (int)(bounds.getX() + bounds.getWidth());
+
 		for (int y = topY - 1; y >= bottomY; y--)
 		{
 			builder.append(border)
-			       .append(subLine(y, cellBounds[Constants.LEFT] - Constants.DELTA, cellBounds[Constants.LEFT]))
+			       .append(subLine(y, left - Constants.DELTA, left))
 			       .append(border)
-			       .append(subLine(y, cellBounds[Constants.LEFT], cellBounds[Constants.RIGHT]))
+			       .append(subLine(y, left, right))
 			       .append(border)
-			       .append(subLine(y, cellBounds[Constants.RIGHT], cellBounds[Constants.RIGHT] + Constants.DELTA))
+			       .append(subLine(y, right, right + Constants.DELTA))
 			       .append(border)
 			       .append('\n');
 		}
