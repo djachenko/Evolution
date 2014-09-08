@@ -1,0 +1,30 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<eclipse-userlibraries>
+  <library name="lib">
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/runtimecommon.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/commons-cli-1.2.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/log4j-1.2.11.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/mpiExp.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/hybdev.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/mpj.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/loader1.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/smpdev.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/mpjbuf.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/commons-codec-1.8.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/javax.servlet.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/tools.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/xdev.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/daemonmanager.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/mpi.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/mpjdev.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/commons-io-2.4.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/niodev.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/starter.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/test.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/mxdev.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/loader2.jar" />
+    <archive path="C:/Users/justin/Projects/Evolution/mpj-v0_42/lib/daemon.jar" />
+  </library>
+  <library name="lib" />
+</eclipse-userlibraries>
+
