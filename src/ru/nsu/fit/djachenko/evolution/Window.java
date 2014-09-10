@@ -29,6 +29,7 @@ public class Window extends JFrame
 
 		pack();
 		setLocationRelativeTo(null);
+		setDefaultCloseOperation(WindowConstants.EXIT_ON_CLOSE);
 	}
 
 	void update(int[][] displayModel)
