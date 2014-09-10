@@ -393,9 +393,7 @@ public class Cell implements Runnable
 		nextGeneration.forEach(agent->stats[agent.getY()]++);
 
 		int[] newSizes = new int[2];
-		int[] bufferSizes = {stats.length, newSizes.length};
-
-		columnCommunicator.Isend(bufferSizes, 0, bufferSizes.length, MPI.INT, 0, Tags.BALANCE_HEIGHT_SIZE_TAG);
+		
 		columnCommunicator.Isend(stats, 0, stats.length, MPI.INT, 0, Tags.BALANCE_HEIGHT_DATA_TAG);
 
 		Request heightBalanceRequest = columnCommunicator.Irecv(newSizes, 0, newSizes.length, MPI.INT, 0, Tags.BALANCE_DIMENSIONS_TAG);

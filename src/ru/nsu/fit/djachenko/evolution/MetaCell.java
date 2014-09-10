@@ -56,6 +56,9 @@ public class MetaCell implements Runnable
 	//height of one cell in column
 	private final int cellHeight;
 
+	private final int[] cellHorisontalBounds;
+	private final int[][] verticalStats;
+
 	private final Serializer serializer = new Serializer();
 
 	MetaCell(Intracomm columnCommunicator)
@@ -93,6 +96,17 @@ public class MetaCell implements Runnable
 		this.rightRank = metaRank + 1;
 
 		this.cellHeight = (int) Math.ceil(1.0 * Constants.HEIGHT / Constants.GRID_HEIGHT);
+
+		cellHorisontalBounds = new int[groupSize];
+
+		cellHorisontalBounds[0] = 0;
+
+		for (int i = 1; i < cellHorisontalBounds.length; i++)
+		{
+			cellHorisontalBounds[i] = cellHorisontalBounds[i - 1] + cellHeight;
+		}
+
+		this.verticalStats = new int[2][Constants.HEIGHT];
 
 		cellSizeRecvRequests = new Request[groupSize];
 		cellSizeBuffers = new int[groupSize][2];
@@ -273,6 +287,77 @@ public class MetaCell implements Runnable
 
 			columnCommunicator.Isend(cellSizeBuffers[i], 0, 1, MPI.INT, i, Tags.META_SIZE_TAG);
 			columnCommunicator.Isend(cellDataSendBuffer, 0, cellDataSendBuffer.length, MPI.BYTE, i, Tags.META_DATA_TAG);
+		}
+	}
+
+	private void balance()
+	{
+		//clear bufers from previous values
+		for (int i = 0; i < verticalStats[0].length; i++)
+		{
+			verticalStats[0][i] = 0;
+			verticalStats[1][i] = 0;
+		}
+
+		//receive statistics data. two buffers are used for preventing data interleaving
+		//because we have to send data both from edges and main cell parts
+		//and, for example, top edge of bottom cell and main part of current may be recieved int the same array cells
+		for (int i = 1; i < groupSize; i++)
+		{
+			cellSizeRecvRequests[i] = columnCommunicator.Irecv(verticalStats[i % 2], cellHorisontalBounds[i - 1], cellHorisontalBounds[i] - cellHorisontalBounds[i - 1], MPI.INT, i, Tags.BALANCE_HEIGHT_DATA_TAG);
+		}
+
+		for (int i = 1; i < groupSize; i++)
+		{
+			cellSizeRecvRequests[i].Wait();
+		}
+
+		int sum = 0;
+
+		//then two buffers are merged
+		for (int i = 0; i < verticalStats[0].length; i++)
+		{
+			verticalStats[0][i] += verticalStats[1][i];
+
+			//and sum is counted
+			//it will be used for counting agent distribution
+			sum += verticalStats[0][i];
+		}
+
+		int[] statistics = verticalStats[0];
+
+		//average number of agents in every cell.
+		//it can be not be integer, it will be approximated later
+		final double average = (double)sum / (groupSize - 1);
+
+		double cellSum = 0;
+
+		int index = 1;
+
+		for (int y = 0; y < statistics.length; y++)
+		{
+			//counting number of agents in cell for future comparing with average
+			cellSum += statistics[y];
+
+			if (y > cellHorisontalBounds[index] - Constants.DELTA &&
+			    Math.abs(cellSum - average) < average / 2 ||
+			    y == cellHorisontalBounds[index] + Constants.DELTA)
+			{
+				double nextSum = cellSum + y == statistics.length - 1 ? 0 : statistics[y + 1];
+
+				if (Math.abs(cellSum - average) < Math.abs(nextSum - average))
+				{
+					cellHorisontalBounds[index] = y;
+
+					cellSum -= average;
+					index++;
+				}
+			}
+		}
+
+		for (int i = 1; i < cellHorisontalBounds.length; i++)
+		{
+			columnCommunicator.Isend(cellHorisontalBounds, i - 1, 2, MPI.INT, i, Tags.BALANCE_DIMENSIONS_TAG);
 		}
 	}
 }
